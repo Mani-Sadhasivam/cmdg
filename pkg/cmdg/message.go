@@ -412,7 +412,7 @@ func (msg *Message) GetReplyTo(ctx context.Context) (string, error) {
 	return msg.GetHeader(ctx, "From")
 }
 
-func filteredEmails(from string, cc map[string]bool) []string {
+func filteredEmails(from string, ownAddrs []string, cc map[string]bool) []string {
 	var ret []string
 	fa, err := mail.ParseAddress(from)
 	if err != nil {
@@ -423,6 +423,11 @@ func filteredEmails(from string, cc map[string]bool) []string {
 	}
 	seen := map[string]bool{
 		fa.Address: true,
+	}
+	for _, own := range ownAddrs {
+		if a, err := mail.ParseAddress(own); err == nil {
+			seen[a.Address] = true
+		}
 	}
 	for s := range cc {
 		a, err := mail.ParseAddress(s)
@@ -440,7 +445,9 @@ func filteredEmails(from string, cc map[string]bool) []string {
 }
 
 // GetReplyToAll returns both To and CC lines for reply-all.
-func (msg *Message) GetReplyToAll(ctx context.Context) (string, string, error) {
+// ownAddrs is the list of the user's own send-as addresses, used to avoid
+// adding the user's own alias to the CC list.
+func (msg *Message) GetReplyToAll(ctx context.Context, ownAddrs []string) (string, string, error) {
 	from, err := msg.GetReplyTo(ctx)
 	if err != nil {
 		return "", "", err
@@ -455,10 +462,9 @@ func (msg *Message) GetReplyToAll(ctx context.Context) (string, string, error) {
 		cc[c] = true
 	}
 	if c, err := msg.GetHeader(ctx, "To"); err == nil && len(c) != 0 {
-		// TODO: if this is not "me"
 		cc[c] = true
 	}
-	return from, strings.Join(filteredEmails(from, cc), ", "), err
+	return from, strings.Join(filteredEmails(from, ownAddrs, cc), ", "), err
 }
 
 // GetFrom returns email address (not name) of sender.
