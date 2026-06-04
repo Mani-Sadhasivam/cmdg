@@ -225,7 +225,8 @@ func Entry(prompt string, keys *input.Input) (string, error) {
 
 // EntryWithHistory asks the user for text input with search history suggestions.
 // On Down arrow or typing, matching history entries are shown and can be selected.
-func EntryWithHistory(prompt string, history []string, keys *input.Input) (string, error) {
+// Pressing 'd' on a highlighted entry removes it from the list and calls onDelete if non-nil.
+func EntryWithHistory(prompt string, history []string, keys *input.Input, onDelete func(string)) (string, error) {
 	screen, err := display.NewScreen()
 	if err != nil {
 		return "", err
@@ -307,6 +308,29 @@ func EntryWithHistory(prompt string, history []string, keys *input.Input) (strin
 			cur = TrimOneChar(cur)
 		case input.CtrlU:
 			cur = ""
+		case "d":
+			if selected >= 0 && selected < len(visible) {
+				deleted := visible[selected]
+				// Remove from opts.
+				newOpts := make([]*Option, 0, len(opts)-1)
+				for _, o := range opts {
+					if o != deleted {
+						newOpts = append(newOpts, o)
+					}
+				}
+				opts = newOpts
+				if onDelete != nil {
+					onDelete(deleted.Key)
+				}
+				// Adjust selection.
+				visible = filterSubmatch(opts, cur)
+				if selected >= len(visible) {
+					selected = len(visible) - 1
+				}
+			} else {
+				cur += string(key)
+				listVisible = true
+			}
 		default:
 			cur += string(key)
 			listVisible = true
