@@ -75,6 +75,44 @@ func getInput(ctx context.Context, prefill string, keys *input.Input) (string, e
 	return string(b), nil
 }
 
+// selectSender prompts the user to choose a send-as address if multiple are configured.
+// Returns the chosen address (formatted as "Name <email>" if a display name exists),
+// or falls back to the default sender on error or if only one address is available.
+func selectSender(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) (string, error) {
+	addrs, err := conn.GetSendAsAddresses(ctx)
+	if err != nil {
+		log.Errorf("Failed to fetch send-as addresses, using default: %v", err)
+		return conn.GetDefaultSender(), nil
+	}
+	if len(addrs) <= 1 {
+		return conn.GetDefaultSender(), nil
+	}
+	var opts []*dialog.Option
+	for i, a := range addrs {
+		label := a.Email
+		if a.DisplayName != "" {
+			label = fmt.Sprintf("%s <%s>", a.DisplayName, a.Email)
+		}
+		if a.IsDefault {
+			label += " (default)"
+		}
+		opts = append(opts, &dialog.Option{
+			Key:    a.Email,
+			KeyInt: i,
+			Label:  label,
+		})
+	}
+	chosen, err := dialog.Selection(opts, "From> ", false, keys)
+	if err != nil {
+		return "", err
+	}
+	a := addrs[chosen.KeyInt]
+	if a.DisplayName != "" {
+		return fmt.Sprintf("%s <%s>", a.DisplayName, a.Email), nil
+	}
+	return a.Email, nil
+}
+
 func composeNew(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) error {
 	to, err := dialog.MultiSelection(dialog.Strings2Options(conn.Contacts()), "To> ", keys)
 	if err == dialog.ErrAborted {
@@ -90,6 +128,14 @@ func composeNew(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) error {
 		}
 		to = p.EmailAddress
 	}
+
+	sender, err := selectSender(ctx, conn, keys)
+	if err == dialog.ErrAborted {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
 	var sig string
 	if signature != "" {
 		sig = "--\n" + signature + "\n"
@@ -103,11 +149,8 @@ Subject:
 
 	headOps := []headOp{
 		func(h *mail.Header) {
-			if h.Get("from") == "" {
-				t := conn.GetDefaultSender()
-				if t != "" {
-					(*h)["From"] = []string{t}
-				}
+			if h.Get("from") == "" && sender != "" {
+				(*h)["From"] = []string{sender}
 			}
 		},
 	}

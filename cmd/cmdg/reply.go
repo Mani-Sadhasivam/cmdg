@@ -32,6 +32,32 @@ var (
 	headerMessageID  = textproto.CanonicalMIMEHeaderKey("Message-ID")
 )
 
+// senderForReply picks the send-as address that matches one of the incoming
+// message's To/CC/Delivered-To headers, so replies automatically use the
+// alias the message was originally sent to.
+func senderForReply(ctx context.Context, conn *cmdg.CmdG, msg *cmdg.Message) string {
+	addrs, err := conn.GetSendAsAddresses(ctx)
+	if err != nil || len(addrs) == 0 {
+		return conn.GetDefaultSender()
+	}
+	for _, hdr := range []string{"To", "CC", "Delivered-To", "X-Original-To"} {
+		v, err := msg.GetHeader(ctx, hdr)
+		if err != nil || v == "" {
+			continue
+		}
+		v = strings.ToLower(v)
+		for _, a := range addrs {
+			if strings.Contains(v, strings.ToLower(a.Email)) {
+				if a.DisplayName != "" {
+					return fmt.Sprintf("%s <%s>", a.DisplayName, a.Email)
+				}
+				return a.Email
+			}
+		}
+	}
+	return conn.GetDefaultSender()
+}
+
 func replyQuoted(s string) string {
 	lines := strings.Split(removeCharsRE.ReplaceAllString(s, ""), "\n")
 	var ret []string
@@ -93,13 +119,12 @@ func replyOrForward(ctx context.Context, conn *cmdg.CmdG, keys *input.Input, to,
 		_ = err
 	}
 
+	sender := senderForReply(ctx, conn, msg)
+
 	headOps := []headOp{
 		func(h *mail.Header) {
-			if h.Get("from") == "" {
-				t := conn.GetDefaultSender()
-				if t != "" {
-					(*h)["From"] = []string{t}
-				}
+			if h.Get("from") == "" && sender != "" {
+				(*h)["From"] = []string{sender}
 			}
 		},
 	}
@@ -129,7 +154,15 @@ func reply(ctx context.Context, conn *cmdg.CmdG, keys *input.Input, msg *cmdg.Me
 }
 
 func replyAll(ctx context.Context, conn *cmdg.CmdG, keys *input.Input, msg *cmdg.Message) error {
-	to, cc, err := msg.GetReplyToAll(ctx)
+	addrs, err := conn.GetSendAsAddresses(ctx)
+	if err != nil {
+		log.Errorf("Failed to fetch send-as addresses for reply-all filtering: %v", err)
+	}
+	var ownAddrs []string
+	for _, a := range addrs {
+		ownAddrs = append(ownAddrs, a.Email)
+	}
+	to, cc, err := msg.GetReplyToAll(ctx, ownAddrs)
 	if err != nil {
 		return err
 	}

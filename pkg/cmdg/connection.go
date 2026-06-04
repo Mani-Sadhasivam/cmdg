@@ -566,6 +566,33 @@ func (c *CmdG) GetFile(ctx context.Context, fn string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
+// SendAsAddress represents a send-as address configured in Gmail.
+type SendAsAddress struct {
+	Email       string
+	DisplayName string
+	IsDefault   bool
+}
+
+// GetSendAsAddresses fetches all send-as addresses configured for the user.
+func (c *CmdG) GetSendAsAddresses(ctx context.Context) ([]*SendAsAddress, error) {
+	var ret []*SendAsAddress
+	err := wrapLogRPC("gmail.Users.Settings.SendAs.List", func() error {
+		r, err := c.gmail.Users.Settings.SendAs.List(email).Context(ctx).Do()
+		if err != nil {
+			return err
+		}
+		for _, sa := range r.SendAs {
+			ret = append(ret, &SendAsAddress{
+				Email:       sa.SendAsEmail,
+				DisplayName: sa.DisplayName,
+				IsDefault:   sa.IsDefault,
+			})
+		}
+		return nil
+	}, "email=%q", email)
+	return ret, err
+}
+
 // Settings stores settings in the app specific folder on Google Drive.
 type Settings struct {
 	Sender string `json:"sender,omitempty"`
