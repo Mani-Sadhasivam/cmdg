@@ -30,7 +30,7 @@ import (
 
 const (
 	// Scope for email, contacts, and appdata.
-	scope = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/drive.appdata"
+	scope = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/contacts https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/gmail.settings.basic"
 
 	pageSize = 100
 

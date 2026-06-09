@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/mail"
 	"net/textproto"
 	"regexp"
 	"strings"
@@ -35,10 +34,10 @@ var (
 // senderForReply picks the send-as address that matches one of the incoming
 // message's To/CC/Delivered-To headers, so replies automatically use the
 // alias the message was originally sent to.
-func senderForReply(ctx context.Context, conn *cmdg.CmdG, msg *cmdg.Message) string {
+func senderForReply(ctx context.Context, conn *cmdg.CmdG, msg *cmdg.Message) *cmdg.SendAsAddress {
 	addrs, err := conn.GetSendAsAddresses(ctx)
 	if err != nil || len(addrs) == 0 {
-		return conn.GetDefaultSender()
+		return nil
 	}
 	for _, hdr := range []string{"To", "CC", "Delivered-To", "X-Original-To"} {
 		v, err := msg.GetHeader(ctx, hdr)
@@ -48,14 +47,17 @@ func senderForReply(ctx context.Context, conn *cmdg.CmdG, msg *cmdg.Message) str
 		v = strings.ToLower(v)
 		for _, a := range addrs {
 			if strings.Contains(v, strings.ToLower(a.Email)) {
-				if a.DisplayName != "" {
-					return fmt.Sprintf("%s <%s>", a.DisplayName, a.Email)
-				}
-				return a.Email
+				return a
 			}
 		}
 	}
-	return conn.GetDefaultSender()
+	// Fall back to the default send-as address.
+	for _, a := range addrs {
+		if a.IsDefault {
+			return a
+		}
+	}
+	return addrs[0]
 }
 
 func replyQuoted(s string) string {
@@ -91,14 +93,37 @@ func replyOrForward(ctx context.Context, conn *cmdg.CmdG, keys *input.Input, to,
 	if err != nil {
 		return err
 	}
+	threadID, err := msg.ThreadID(ctx)
+	if err != nil {
+		return err
+	}
+
 	headers := []string{
 		fmt.Sprintf("To: %s", to),
 	}
 	if len(cc) != 0 {
 		headers = append(headers, fmt.Sprintf("CC: %s", cc))
 	}
-
 	headers = append(headers, fmt.Sprintf("Subject: %s%s", subjPrefix, rmPrefix.ReplaceAllString(subj, "")))
+
+	sendAsAddr := senderForReply(ctx, conn, msg)
+	if addr := formatSendAsAddr(sendAsAddr); addr != "" {
+		headers = append(headers, fmt.Sprintf("From: %s", addr))
+	} else if d := conn.GetDefaultSender(); d != "" {
+		headers = append(headers, fmt.Sprintf("From: %s", d))
+	}
+
+	refs, _ := msg.GetReferences(ctx)
+	if msgID, err := msg.GetHeader(ctx, headerMessageID); err != nil {
+		log.Errorf("Failed to get message ID when replying: %v", err)
+		if len(refs) > 0 {
+			headers = append(headers, fmt.Sprintf("References: %s", strings.Join(refs, " ")))
+		}
+	} else {
+		headers = append(headers, fmt.Sprintf("In-Reply-To: %s", msgID))
+		headers = append(headers, fmt.Sprintf("References: %s", strings.Join(append(refs, msgID), " ")))
+	}
+
 	body := []string{
 		fmt.Sprintf("On %s, %s said:", date.Format("Mon, 2 Jan 2006 15:04:05 -0700"), orig),
 		replyQuoted(b),
@@ -107,42 +132,9 @@ func replyOrForward(ctx context.Context, conn *cmdg.CmdG, keys *input.Input, to,
 		body = append(body, "\n--\n"+signature+"\n")
 	}
 
-	threadID, err := msg.ThreadID(ctx)
-	if err != nil {
-		return err
-	}
-
 	prefill := strings.Join(headers, "\n") + "\n\n" + strings.Join(body, "\n")
-	refs, err := msg.GetReferences(ctx)
-	if err != nil {
-		// don't care
-		_ = err
-	}
 
-	sender := senderForReply(ctx, conn, msg)
-
-	headOps := []headOp{
-		func(h *mail.Header) {
-			if h.Get("from") == "" && sender != "" {
-				(*h)["From"] = []string{sender}
-			}
-		},
-	}
-	if v, err := msg.GetHeader(ctx, headerMessageID); err != nil {
-		log.Errorf("Failed to get message ID when replying: %v", err)
-		if refs != nil {
-			headOps = append(headOps, func(head *mail.Header) {
-				(*head)[headerReferences] = []string{strings.Join(refs, " ")}
-			})
-		}
-	} else {
-		headOps = append(headOps, func(head *mail.Header) {
-			(*head)[headerInReplyTo] = []string{v}
-			(*head)[headerReferences] = []string{strings.Join(append(refs, v), " ")}
-		})
-	}
-
-	return compose(ctx, conn, headOps, keys, threadID, prefill, attachments)
+	return compose(ctx, conn, nil, keys, threadID, prefill, attachments)
 }
 
 func reply(ctx context.Context, conn *cmdg.CmdG, keys *input.Input, msg *cmdg.Message) error {

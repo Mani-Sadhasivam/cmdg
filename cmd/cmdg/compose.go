@@ -75,17 +75,30 @@ func getInput(ctx context.Context, prefill string, keys *input.Input) (string, e
 	return string(b), nil
 }
 
-// selectSender prompts the user to choose a send-as address if multiple are configured.
-// Returns the chosen address (formatted as "Name <email>" if a display name exists),
-// or falls back to the default sender on error or if only one address is available.
-func selectSender(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) (string, error) {
+// formatSendAsAddr formats a send-as address as "Name <email>" or just "email".
+func formatSendAsAddr(a *cmdg.SendAsAddress) string {
+	if a == nil {
+		return ""
+	}
+	if a.DisplayName != "" {
+		return fmt.Sprintf("%s <%s>", a.DisplayName, a.Email)
+	}
+	return a.Email
+}
+
+// selectSender prompts the user to choose a send-as address if multiple are
+// configured. Returns nil on error or when only one address is available.
+func selectSender(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) (*cmdg.SendAsAddress, error) {
 	addrs, err := conn.GetSendAsAddresses(ctx)
 	if err != nil {
 		log.Errorf("Failed to fetch send-as addresses, using default: %v", err)
-		return conn.GetDefaultSender(), nil
+		return nil, nil
 	}
 	if len(addrs) <= 1 {
-		return conn.GetDefaultSender(), nil
+		if len(addrs) == 1 {
+			return addrs[0], nil
+		}
+		return nil, nil
 	}
 	var opts []*dialog.Option
 	for i, a := range addrs {
@@ -104,13 +117,9 @@ func selectSender(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) (stri
 	}
 	chosen, err := dialog.Selection(opts, "From> ", false, keys)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	a := addrs[chosen.KeyInt]
-	if a.DisplayName != "" {
-		return fmt.Sprintf("%s <%s>", a.DisplayName, a.Email), nil
-	}
-	return a.Email, nil
+	return addrs[chosen.KeyInt], nil
 }
 
 func composeNew(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) error {
@@ -129,7 +138,7 @@ func composeNew(ctx context.Context, conn *cmdg.CmdG, keys *input.Input) error {
 		to = p.EmailAddress
 	}
 
-	sender, err := selectSender(ctx, conn, keys)
+	sendAsAddr, err := selectSender(ctx, conn, keys)
 	if err == dialog.ErrAborted {
 		return nil
 	} else if err != nil {
@@ -149,8 +158,14 @@ Subject:
 
 	headOps := []headOp{
 		func(h *mail.Header) {
-			if h.Get("from") == "" && sender != "" {
-				(*h)["From"] = []string{sender}
+			if h.Get("from") == "" {
+				addr := formatSendAsAddr(sendAsAddr)
+				if addr == "" {
+					addr = conn.GetDefaultSender()
+				}
+				if addr != "" {
+					(*h)["From"] = []string{addr}
+				}
 			}
 		},
 	}
