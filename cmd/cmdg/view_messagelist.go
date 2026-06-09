@@ -81,25 +81,24 @@ func showError(oscreen *display.Screen, keys *input.Input, msg string) {
 const (
 	threadListViewHelp = `?, F1              — Help
 enter, →           — Open conversation
-space, x           — Mark thread and advance
-X                  — Mark thread and step up
-e                  — Archive marked threads
-d                  — Move marked threads to trash
-I                  — Mark marked threads as read
-l                  — Label marked threads
-L                  — Unlabel marked threads
-*                  — Toggle starred on highlighted thread
-c                  — Compose new message
+space, t           — Tag thread and advance
+e                  — Archive tagged threads
+d                  — Move tagged threads to trash
+R                  — Mark tagged threads as read
+N                  — Mark tagged threads as unread
+l                  — Label tagged threads
+L                  — Unlabel tagged threads
+F                  — Toggle starred on highlighted thread
+m                  — Compose new message
 C                  — Continue message from draft
-N, n, ^N, j, Down  — Next thread
-P, p, ^P, k, Up    — Previous thread
+j, ^N, Down        — Next thread
+k, ^P, Up          — Previous thread
 PgDn               — Page down (3/4 screen)
 PgUp               — Page up (3/4 screen)
-r, ^R              — Reload current view
-g                  — Go to label
+$, ^R              — Reload current view
+c                  — Change folder / go to label
 1                  — Go to inbox
-U                  — Mark marked threads as unread
-s, ^s              — Search
+/                  — Search
 q                  — Quit
 ^L                 — Refresh screen
 
@@ -500,7 +499,7 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 					tv.removeMarked(marked, &scroll)
 					marked = map[string]bool{}
 				}
-			case "I": // Mark read.
+			case "R": // Mark read.
 				threads := tv.markedThreads(marked)
 				if len(threads) == 0 {
 					break
@@ -512,7 +511,7 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 						}
 					}
 				}()
-			case "U": // Mark unread.
+			case "N": // Mark unread.
 				threads := tv.markedThreads(marked)
 				if len(threads) == 0 {
 					break
@@ -538,7 +537,7 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 				}()
 				tv.removeMarked(marked, &scroll)
 				marked = map[string]bool{}
-			case "*":
+			case "F":
 				if tv.pos >= len(tv.threads) {
 					break
 				}
@@ -610,7 +609,7 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 						}
 					}
 				}
-			case "c":
+			case "m":
 				if err := composeNew(ctx, conn, tv.keys); err != nil {
 					tv.errors <- errors.Wrapf(err, "Composing new message")
 				}
@@ -621,24 +620,17 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 			case input.Home, input.XHome:
 				tv.pos = 0
 				scroll = 0
-			case "x", " ":
+			case "t", " ":
 				if tv.pos < len(tv.threads) {
 					marked[tv.threads[tv.pos].ID] = !marked[tv.threads[tv.pos].ID]
 					next()
 				}
-			case "X":
-				if tv.pos < len(tv.threads) {
-					marked[tv.threads[tv.pos].ID] = !marked[tv.threads[tv.pos].ID]
-					prev()
-				}
-			case "u":
-				marked = map[string]bool{}
-			case "N", "n", "j", input.CtrlN, input.Down:
+			case "j", input.CtrlN, input.Down:
 				screen.UseCache()
 				if !next() {
 					continue
 				}
-			case "P", "p", "k", input.CtrlP, input.Up:
+			case "k", input.CtrlP, input.Up:
 				screen.UseCache()
 				if !prev() {
 					continue
@@ -671,11 +663,11 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 				if !moved {
 					continue
 				}
-			case "r", input.CtrlR:
+			case "$", input.CtrlR:
 				empty()
 				screen.Clear()
 				go tv.fetchPage(ctx, "")
-			case "g":
+			case "c":
 				var opts []*dialog.Option
 				for _, l := range conn.Labels() {
 					if strings.HasPrefix(l.ID, "CATEGORY_") {
@@ -700,7 +692,7 @@ func (tv *ThreadListView) Run(ctx context.Context) error {
 				}
 			case "1":
 				return NewThreadListView(ctx, cmdg.Inbox, "", tv.keys).Run(ctx)
-			case "s", input.CtrlS:
+			case "/", input.CtrlS:
 				q, err := dialog.EntryWithHistory("Query> ", loadSearchHistory(), tv.keys, removeFromHistory)
 				if err == dialog.ErrAborted {
 					// That's fine.

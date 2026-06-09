@@ -21,25 +21,25 @@ var (
 
 const (
 	conversationViewHelp = `?, F1              — Help
-u, ←               — Back to thread list
-U                  — Back (mark unread)
+i, ←               — Back to thread list
+N                  — Back (mark unread)
 ^N                 — Next thread
 ^P                 — Previous thread
 enter              — Expand/collapse message
-n, j, Down         — Scroll down / next message header
-p, k, Up           — Scroll up / previous message header
+j, Down            — Scroll down / next message header
+k, Up              — Scroll up / previous message header
 Space, PgDn        — Page down
 Backspace, PgUp    — Page up
 e                  — Archive thread
 d                  — Trash thread
 l                  — Add label to thread
 L                  — Remove label from thread
-*                  — Toggle starred
+F                  — Toggle starred
 r                  — Reply to last message
-a                  — Reply all to last message
+g                  — Reply all to last message
 f                  — Forward last message
-t                  — View attachments of focused message
-q                  — Quit
+v                  — View attachments of focused message
+q                  — Back to thread list
 
 Press [enter] to exit
 `
@@ -269,32 +269,32 @@ func (cv *ConversationView) Run(ctx context.Context) (*ThreadViewOp, error) {
 				if err := help(conversationViewHelp, cv.keys); err != nil {
 					log.Infof("help() failed: %v", err)
 				}
-			case "U":
+			case "N":
 				go func() {
 					if err := cv.thread.AddLabelID(ctx, cmdg.Unread); err != nil {
 						log.Warningf("Failed to mark thread as unread: %v", err)
 					}
 				}()
 				return nil, nil
-			case "u", input.Left:
+			case "i", input.Left:
 				return nil, nil
 			case input.CtrlN:
 				return ThreadOpNext(), nil
 			case input.CtrlP:
 				return ThreadOpPrev(), nil
 			case "q":
-				return ThreadOpQuit(), nil
+				return nil, nil
 			case input.Enter:
 				// Toggle expand/collapse of focused message
 				cv.expandedMsgs[cv.focusedMsg] = !cv.expandedMsgs[cv.focusedMsg]
-			case "N", "n", "j", input.Down:
+			case "j", input.Down:
 				count := cv.thread.MessageCount()
 				if cv.focusedMsg < count-1 {
 					cv.focusedMsg++
 				} else {
 					cv.scroll++
 				}
-			case "P", "p", "k", input.Up:
+			case "k", input.Up:
 				if cv.focusedMsg > 0 {
 					cv.focusedMsg--
 				} else if cv.scroll > 0 {
@@ -321,7 +321,7 @@ func (cv *ConversationView) Run(ctx context.Context) (*ThreadViewOp, error) {
 					}
 				}()
 				return ThreadOpRemoveCurrent(nil), nil
-			case "*":
+			case "F":
 				if cv.thread.IsStarred() {
 					go func() {
 						if err := cv.thread.RemoveLabelID(ctx, cmdg.Starred); err != nil {
@@ -382,7 +382,7 @@ func (cv *ConversationView) Run(ctx context.Context) (*ThreadViewOp, error) {
 						cv.errors <- errors.Wrapf(err, "replying")
 					}
 				}
-			case "a":
+			case "g":
 				msgs := cv.thread.Messages
 				if cv.focusedMsg < len(msgs) {
 					if err := replyAll(ctx, conn, cv.keys, msgs[cv.focusedMsg]); err != nil {
@@ -396,7 +396,7 @@ func (cv *ConversationView) Run(ctx context.Context) (*ThreadViewOp, error) {
 						cv.errors <- errors.Wrapf(err, "forwarding")
 					}
 				}
-			case "t":
+			case "v":
 				// View attachments of focused message
 				msgs := cv.thread.Messages
 				if cv.focusedMsg < len(msgs) {
